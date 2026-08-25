@@ -1,0 +1,33 @@
+[project]
+name = "ufc-fight-predictor"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Kenny Lin", email = "kennyyylin@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "httpx>=0.28.1",
+    "lxml>=6.1.2",
+    "numpy>=2.4.6",
+    "pandas>=3.0.5",
+    "pydantic>=2.13.4",
+    "scikit-learn>=1.9.0",
+    "sqlalchemy>=2.0.52",
+]
+
+[project.scripts]
+ufc-fight-predictor = "ufc_fight_predictor:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.4",
+]
