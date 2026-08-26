@@ -1,6 +1,6 @@
 import pytest
 
-from ufc_forecast.probability import american_probabilities
+from ufc-fight-predictor.probability import american_probabilities
 
 
 def test_positive_american_odds():
