@@ -1,33 +1,31 @@
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright, TimeoutError
-import logging
-#for parsing completed events on ufcstats home page
-#events have date, location and name
+from ufc_fight_predictor.data.scraper.models import Event
 
-#how is the overall application going to behave? 
-#need the events page
-    #fetch events page -> fetch each fight, fighter, stats, etc from each event
 
-#let's fetch the events page first
-SECTION = 'a.b-statistics__sub-tabs-link[href$="/completed"]'
-def fetch_page(url):
-    with sync_playwright() as playwright:
-        #headless must be false to bypass browser check
-        browser = playwright.chromium.launch(headless=False)
+def extract_events(html: str) -> list[Event]:
+    print("in extract_events")
+    events_list = []
+    soup = BeautifulSoup(html, "lxml")
+    #iterate over all tags
+    for event in soup.select(".b-statistics__table-row"):
+        # print(f"event: {event}")
+        event_link = event.select_one('a[href*="/event-details/"]')
+        date_el = event.select_one(".b-statistics__date")
+        location_el = event.select_one(".b-statistics__table-col_style_big-top-padding")
 
-        page = browser.new_page()
-        
-        try:
-            page.goto(
-                url, 
-                wait_until="domcontentloaded",
-                timeout=60_000,
-            )
-            page.locator(SECTION).wait_for(timeout=15_000)
-        except TimeoutError:
-            logging.exception("Timed out waiting for dom content to load")
-        html = page.content()
+        if event_link is None:
+            continue
+        if date_el is None or location_el is None:
+            raise ValueError("Event row is missing date or location")
 
-        browser.close()
-
-    return html
+        url = event_link["href"]
+        event_name = event_link.get_text(strip=True)
+        e = Event(
+            event_id=url.strip("/").split("/")[-1],
+            name=event_name,
+            date=date_el.get_text(strip=True),
+            location=location_el.get_text(" ", strip=True),
+            url=url
+        )
+        events_list.append(e)
+    return events_list

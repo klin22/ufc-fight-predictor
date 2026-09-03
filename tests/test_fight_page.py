@@ -20,6 +20,5 @@ else:
         print(f"Saved {len(html)} chars to 'tests/captured_html/test_fight_page.html'")
     else:
         print("test_fight_page.py already exists, skipping...")
-    print(f"testing extract_winner_id: ")
     fighters = extract_fighters(html)
     extract_winner_id(html, fighters)

@@ -1,8 +1,8 @@
-#test client
+#fetches pages
 from playwright.sync_api import sync_playwright, TimeoutError
 import logging
-SECTION = ".b-fight-details__person-name"
-def fetch_page(url):
+SECTION = 'a.b-statistics__sub-tabs-link[href$="/completed"]'
+def fetch_page(url: str, selector: str):
     with sync_playwright() as playwright:
         #headless must be false to bypass browser check
         browser = playwright.chromium.launch(headless=False)
@@ -15,15 +15,10 @@ def fetch_page(url):
                 wait_until="domcontentloaded",
                 timeout=60_000,
             )
-            #change this to locator
-            page.wait_for_selector(
-                SECTION,
-                timeout=15_000
-            )
+            page.locator(selector).wait_for(timeout=15_000)
+            return page.content()
         except TimeoutError:
-            logging.exception(f"Timed out waiting for selector: {SECTION}")
-        html = page.content()
-
-        browser.close()
-
-    return html
+            logging.exception("Timed out waiting for dom content to load")
+            raise
+        finally:
+            browser.close()
