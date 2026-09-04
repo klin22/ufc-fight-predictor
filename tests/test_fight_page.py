@@ -1,6 +1,5 @@
 from ufc_fight_predictor.data.scraper.fights_page import fetch_page
 from ufc_fight_predictor.data.scraper.fights import extract_winner_id, extract_fighters
-from pathlib import Path
 
 #fight page
 test_url = "http://www.ufcstats.com/fight-details/afec383a96893ec5"

@@ -23,8 +23,7 @@ def extract_fighters(html):
         fighters.append(fighter)
 
     return fighters
-#how to extract this into sql? 
-    #tables for fighters, fights, fight stats, round stats etc
+
 def extract_winner_id(html:str)-> str:
     soup = BeautifulSoup(html, "lxml")
     for person in soup.select(".b-fight-details__person"):
@@ -39,5 +38,6 @@ def extract_winner_id(html:str)-> str:
             url = link["href"]
             return url.rstrip("/").split("/")[-1]
     return None
+
 
 

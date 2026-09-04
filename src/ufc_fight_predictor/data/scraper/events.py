@@ -29,3 +29,18 @@ def extract_events(html: str) -> list[Event]:
         )
         events_list.append(e)
     return events_list
+
+#why do i extract fight urls? We can probably access those pages with playwright
+#or some equivalent
+def extract_fight_urls(html: str) -> list[str] :
+    soup = BeautifulSoup(html, "lxml")
+    fight_urls = []
+    for row in soup.select("tr.b-fight-details__table-row[data-link]"):
+        if row is None:
+            print("Empty Fight Row Detected")
+            continue
+        fight_url = row["data-link"]
+        fight_urls.append(fight_url)
+    print(f"Number of fight_urls extracted: {len(fight_urls)}")
+    print(fight_urls)
+    return fight_urls
