@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright, TimeoutError
 SECTION = 'a.b-statistics__sub-tabs-link[href$="/completed"]'
 logger = logging.getLogger(__name__)
 #should eventually fetch all pages for completed and uncompleted fights
-
+#try fetching all fights for all events on a page
 def fetch_page(url: str, selector: str):
     with sync_playwright() as playwright:
         #headless must be false to bypass browser check

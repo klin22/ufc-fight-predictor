@@ -1,23 +1,33 @@
-from ufc_fight_predictor.data.scraper.fights_page import fetch_page
-from ufc_fight_predictor.data.scraper.fights import extract_winner_id, extract_fighters
+from pathlib import Path
+
+from ufc_fight_predictor.data.scraper.fights import *
 
 #fight page
-test_url = "http://www.ufcstats.com/fight-details/afec383a96893ec5"
-output_path = "tests/captured_html/test_fight_page.py"
 
-html = fetch_page(test_url)
-html = html.lower()
+FIGHT_FIXTURE_PATH = Path("tests/captured_html/test_fight.html")
+# FIGHT_URL = 
 
-if "checking your browser" in html:
-    print("FAIL: Did not pass browser javascript check")
-else:
-    print("SUCCESS: You have accessed the ufcstats html")
-    #Save the fighter page into an output file
-    #only write if test_fight_page doesn't currently exist
-    if not output_path.exists():
-        output_path.Path("tests/captured_html/test_fight.html").write_text(html, encoding="utf-8")
-        print(f"Saved {len(html)} chars to 'tests/captured_html/test_fight_page.html'")
-    else:
-        print("test_fight_page.py already exists, skipping...")
+def load_fight_fixture():
+    return FIGHT_FIXTURE_PATH.read_text(encoding="utf8")
+
+def test_extract_fighters():
+    html = load_fight_fixture()
     fighters = extract_fighters(html)
-    extract_winner_id(html, fighters)
+    assert len(fighters) == 2
+
+
+def test_extract_fight_metadata():
+    html = load_fight_fixture()
+    weight, method, round, time, time_format, referee = (extract_fight_metadata(html))
+    assert weight == "flyweight"
+    assert method == "decision - unanimous"
+    assert round == "3"
+    assert time == "5:00"
+    assert time_format == "3 rnd"
+    assert referee == "lukasz bosacki"
+
+def test_extract_fight():
+    html = load_fight_fixture()
+    fight = extract_fight(html, "http://www.ufcstats.com/event-details/872b018076f831b0")
+    assert fight is not None
+    print(f"Fight: {fight}")
