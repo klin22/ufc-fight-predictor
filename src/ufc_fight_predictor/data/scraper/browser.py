@@ -7,7 +7,7 @@ SECTION = 'a.b-statistics__sub-tabs-link[href$="/completed"]'
 logger = logging.getLogger(__name__)
 #should eventually fetch all pages for completed and uncompleted fights
 #try fetching all fights for all events on a page
-def fetch_page(url: str, selector: str):
+def fetch_page(url: str, selector: str)->str:
     with sync_playwright() as playwright:
         #headless must be false to bypass browser check
         browser = playwright.chromium.launch(headless=False)

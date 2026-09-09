@@ -9,13 +9,11 @@ class Fight(BaseModel):
     ufcstats_id: str
     url: str
     fighter_a: Fighter
-    # fighter_a_stats: FightStats
     fighter_b: Fighter
-    # fighter_b_stats: FightStats
     winner_id: str | None
     weight_class: str
     method: str
-    end_round: str
+    end_round: int
     end_time: str
     time_format:str
     referee: str

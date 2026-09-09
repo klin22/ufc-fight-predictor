@@ -8,6 +8,34 @@ from ufc_fight_predictor.data.scraper.models import (
 )
 
 FIGHTER_SELECTOR = "a.b-fight-details__person-link"
+REQUIRED_TOTAL_COLUMNS = {
+    "kd", "sig. str", "total str", "td", "sub. att", "rev", "ctrl"
+}
+REQUIRED_SIGNIFICANT_COLUMNS = {
+    "head", "body", "leg", "distance", "clinch", "ground"
+}
+
+
+def _parse_pair(value: str, field: str) -> tuple[int, int]:
+    landed, separator, attempted = value.partition(" of ")
+    if not separator:
+        raise ValueError(f"Invalid {field} value: {value}")
+    try:
+        return int(landed), int(attempted)
+    except ValueError as error:
+        raise ValueError(f"Invalid {field} value: {value}") from error
+
+
+def _parse_control_seconds(value: str, field: str) -> int:
+    minutes, separator, seconds = value.partition(":")
+    if not separator:
+        raise ValueError(f"Invalid {field} value: {value}")
+    try:
+        return int(minutes) * 60 + int(seconds)
+    except ValueError as error:
+        raise ValueError(f"Invalid {field} value: {value}") from error
+
+
 def extract_fighters(html):
     soup = BeautifulSoup(html, "lxml")
     fighter_links = soup.select(
@@ -149,51 +177,35 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
     totals = fighter_tables["totals"]
     significant = fighter_tables["significant"]
 
-    required_totals = {
-        "kd", "sig. str", "total str", "td", "sub. att", "rev", "ctrl"
-    }
-    required_significant = {
-        "head", "body", "leg", "distance", "clinch", "ground"
-    }
     missing_columns = (
-        required_totals - totals.keys()
-        | required_significant - significant.keys()
+        REQUIRED_TOTAL_COLUMNS - totals.keys()
+        | REQUIRED_SIGNIFICANT_COLUMNS - significant.keys()
     )
     if missing_columns:
         raise ValueError(
             f"Missing stat columns: {', '.join(sorted(missing_columns))}"
         )
 
-    def parse_pair(value: str, field: str) -> tuple[int, int]:
-        landed, separator, attempted = value.partition(" of ")
-        if not separator:
-            raise ValueError(f"Invalid {field} value: {value}")
-        try:
-            return int(landed), int(attempted)
-        except ValueError as error:
-            raise ValueError(f"Invalid {field} value: {value}") from error
-
-    sig_landed, sig_attempted = parse_pair(totals["sig. str"], "sig. str")
-    total_landed, total_attempted = parse_pair(totals["total str"], "total str")
-    td_landed, td_attempted = parse_pair(totals["td"], "td")
-    head_landed, head_attempted = parse_pair(significant["head"], "head")
-    body_landed, body_attempted = parse_pair(significant["body"], "body")
-    leg_landed, leg_attempted = parse_pair(significant["leg"], "leg")
-    distance_landed, distance_attempted = parse_pair(
+    sig_landed, sig_attempted = _parse_pair(totals["sig. str"], "sig. str")
+    total_landed, total_attempted = _parse_pair(
+        totals["total str"], "total str"
+    )
+    td_landed, td_attempted = _parse_pair(totals["td"], "td")
+    head_landed, head_attempted = _parse_pair(significant["head"], "head")
+    body_landed, body_attempted = _parse_pair(significant["body"], "body")
+    leg_landed, leg_attempted = _parse_pair(significant["leg"], "leg")
+    distance_landed, distance_attempted = _parse_pair(
         significant["distance"], "distance"
     )
-    clinch_landed, clinch_attempted = parse_pair(
+    clinch_landed, clinch_attempted = _parse_pair(
         significant["clinch"], "clinch"
     )
-    ground_landed, ground_attempted = parse_pair(
+    ground_landed, ground_attempted = _parse_pair(
         significant["ground"], "ground"
     )
 
-    minutes, separator, seconds = totals["ctrl"].partition(":")
-    if not separator:
-        raise ValueError(f"Invalid ctrl value: {totals['ctrl']}")
     try:
-        control_seconds = int(minutes) * 60 + int(seconds)
+        control_seconds = _parse_control_seconds(totals["ctrl"], "ctrl")
         knockdowns = int(totals["kd"])
         submission_attempts = int(totals["sub. att"])
         reversals = int(totals["rev"])
@@ -230,29 +242,6 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
 def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
     soup = BeautifulSoup(html, "lxml")
     round_tables = {}
-    totals_columns = (
-        "fighter",
-        "kd",
-        "sig. str",
-        "sig. str. %",
-        "total str",
-        "td",
-        "td %",
-        "sub. att",
-        "rev",
-        "ctrl",
-    )
-    significant_columns = (
-        "fighter",
-        "sig. str",
-        "sig. str. %",
-        "head",
-        "body",
-        "leg",
-        "distance",
-        "clinch",
-        "ground",
-    )
 
     for table in soup.find_all("table"):
         header = table.select_one("thead.b-fight-details__table-head_rnd")
@@ -265,10 +254,8 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
         ]
         if "kd" in headers:
             table_name = "totals"
-            columns = totals_columns
         elif "head" in headers:
             table_name = "significant"
-            columns = significant_columns
         else:
             continue
 
@@ -293,7 +280,7 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
                 raise ValueError(f"Invalid round number: {number}") from error
 
             cells = row.find_all("td", recursive=False)
-            if len(cells) != len(columns):
+            if len(cells) != len(headers):
                 raise ValueError(
                     f"Unexpected round {round_number} {table_name} structure"
                 )
@@ -308,34 +295,24 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
                 continue
 
             values = {}
-            for column_name, cell in zip(columns, cells):
+            for column_name, cell in zip(headers, cells):
                 fighter_values = cell.select("p.b-fight-details__table-text")
                 if fighter_index >= len(fighter_values):
                     raise ValueError(
                         f"Missing round {round_number} {column_name} value for "
                         f"{fighter.ufcstats_id}"
                     )
-                values[column_name] = fighter_values[
+                value = fighter_values[
                     fighter_index
                 ].get_text(" ", strip=True)
+                if column_name == "td %" and " of " in value:
+                    column_name = "td"
+                values[column_name] = value
 
             round_tables.setdefault(round_number, {})[table_name] = values
 
     if not round_tables:
         raise ValueError(f"Missing round stats for {fighter.ufcstats_id}")
-
-    def parse_pair(value: str, field: str, round_number: int) -> tuple[int, int]:
-        landed, separator, attempted = value.partition(" of ")
-        if not separator:
-            raise ValueError(
-                f"Invalid round {round_number} {field} value: {value}"
-            )
-        try:
-            return int(landed), int(attempted)
-        except ValueError as error:
-            raise ValueError(
-                f"Invalid round {round_number} {field} value: {value}"
-            ) from error
 
     rounds = []
     for round_number, tables in sorted(round_tables.items()):
@@ -349,41 +326,48 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
 
         totals = tables["totals"]
         significant = tables["significant"]
-        sig_landed, sig_attempted = parse_pair(
-            totals["sig. str"], "sig. str", round_number
+        missing_columns = (
+            REQUIRED_TOTAL_COLUMNS - totals.keys()
+            | REQUIRED_SIGNIFICANT_COLUMNS - significant.keys()
         )
-        total_landed, total_attempted = parse_pair(
-            totals["total str"], "total str", round_number
+        if missing_columns:
+            raise ValueError(
+                f"Missing round {round_number} stat columns: "
+                f"{', '.join(sorted(missing_columns))}"
+            )
+
+        sig_landed, sig_attempted = _parse_pair(
+            totals["sig. str"], f"round {round_number} sig. str"
         )
-        td_landed, td_attempted = parse_pair(
-            totals["td"], "td", round_number
+        total_landed, total_attempted = _parse_pair(
+            totals["total str"], f"round {round_number} total str"
         )
-        head_landed, head_attempted = parse_pair(
-            significant["head"], "head", round_number
+        td_landed, td_attempted = _parse_pair(
+            totals["td"], f"round {round_number} td"
         )
-        body_landed, body_attempted = parse_pair(
-            significant["body"], "body", round_number
+        head_landed, head_attempted = _parse_pair(
+            significant["head"], f"round {round_number} head"
         )
-        leg_landed, leg_attempted = parse_pair(
-            significant["leg"], "leg", round_number
+        body_landed, body_attempted = _parse_pair(
+            significant["body"], f"round {round_number} body"
         )
-        distance_landed, distance_attempted = parse_pair(
-            significant["distance"], "distance", round_number
+        leg_landed, leg_attempted = _parse_pair(
+            significant["leg"], f"round {round_number} leg"
         )
-        clinch_landed, clinch_attempted = parse_pair(
-            significant["clinch"], "clinch", round_number
+        distance_landed, distance_attempted = _parse_pair(
+            significant["distance"], f"round {round_number} distance"
         )
-        ground_landed, ground_attempted = parse_pair(
-            significant["ground"], "ground", round_number
+        clinch_landed, clinch_attempted = _parse_pair(
+            significant["clinch"], f"round {round_number} clinch"
+        )
+        ground_landed, ground_attempted = _parse_pair(
+            significant["ground"], f"round {round_number} ground"
         )
 
-        minutes, separator, seconds = totals["ctrl"].partition(":")
-        if not separator:
-            raise ValueError(
-                f"Invalid round {round_number} ctrl value: {totals['ctrl']}"
-            )
         try:
-            control_seconds = int(minutes) * 60 + int(seconds)
+            control_seconds = _parse_control_seconds(
+                totals["ctrl"], f"round {round_number} ctrl"
+            )
             knockdowns = int(totals["kd"])
             submission_attempts = int(totals["sub. att"])
             reversals = int(totals["rev"])
