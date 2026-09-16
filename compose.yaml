@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:18.6
+    container_name: ufc_postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    volumes:
+      - ufc_postgres_data:/var/lib/postgresql
+
+volumes:
+  ufc_postgres_data:

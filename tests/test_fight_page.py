@@ -222,7 +222,6 @@ def test_extract_round_stats_missing_column():
     with pytest.raises(ValueError, match="body"):
         extract_round_stats(str(soup), fighter)
 
-#scrape list of fights into captured_html individually and run tests on those
 
 def test_comprehensive():
     html_paths = sorted(EVENT_FIGHT_DIR.glob("*.html"))

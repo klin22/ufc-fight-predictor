@@ -33,3 +33,5 @@ data/processed/*
 # ML artifacts
 artifacts/
 models/
+
+tests/captured_html/
