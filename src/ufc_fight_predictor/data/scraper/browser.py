@@ -18,7 +18,7 @@ def fetch_page(url: str, selector: str)->str:
                 page.goto(
                     url, 
                     wait_until="domcontentloaded",
-                    timeout=60_000,
+                    timeout=20_000,
                 )
             except TimeoutError:
                 logger.exception("Timed out waiting for dom content to load")

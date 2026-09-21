@@ -36,7 +36,7 @@ def _parse_control_seconds(value: str, field: str) -> int:
         raise ValueError(f"Invalid {field} value: {value}") from error
 
 
-def extract_fighters(html):
+def extract_fighters(html: str) -> list[Fighter]:
     soup = BeautifulSoup(html, "lxml")
     fighter_links = soup.select(
         FIGHTER_SELECTOR
@@ -69,7 +69,7 @@ def extract_winner_id(html:str)-> str | None:
             url = link["href"]
             return url.rstrip("/").split("/")[-1]
     return None
-
+#helper
 def extract_fight_metadata(html:str) -> tuple[
     str, str, str, str, str, str]:
     soup = BeautifulSoup(html, "lxml")
@@ -101,7 +101,7 @@ def extract_fight_metadata(html:str) -> tuple[
         values["time format"],
         values["referee"]
     )
-
+#extracts fight
 def extract_fight(html:str, url:str) -> Fight:
     fighters = extract_fighters(html)
     winner_id = extract_winner_id(html)

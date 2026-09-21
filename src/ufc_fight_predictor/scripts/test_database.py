@@ -1,25 +1,21 @@
 from sqlalchemy import text
-from datetime import date
-from ufc_fight_predictor.data.database.connection import engine, SessionLocal
-from ufc_fight_predictor.data.database.models import Event, Base
+
+from ufc_fight_predictor.data.database.models import Base
+
 # with engine.connect() as connection:
 #     result = connection.execute(text("SELECT 1"))
 #     print(result.scalar())
 
-try:
+
+def main() -> None:
+    from ufc_fight_predictor.data.database.connection import SessionLocal, engine
+
     Base.metadata.create_all(engine)
-except:
-    print("Base.metadata.create_all failed")
 
-with SessionLocal() as session:
-    ufc_america = Event(
-        ufcstats_id="12345",
-        name="ufc_america",
-        event_date=date(2026, 9, 19),
-        location="abu dhabi",
-        url="https://xyz.com"
+    with SessionLocal() as session:
+        result = session.execute(text("SELECT 1"))
+        print(result.scalar_one())
 
-    )
-    session.add(ufc_america)
-    session.commit()
-    
+
+if __name__ == "__main__":
+    main()

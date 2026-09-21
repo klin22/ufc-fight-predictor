@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pydantic import BaseModel
 
 class Fighter(BaseModel):
@@ -8,6 +9,7 @@ class Fighter(BaseModel):
 class Fight(BaseModel):
     ufcstats_id: str
     url: str
+    event: Event | None = None
     fighter_a: Fighter
     fighter_b: Fighter
     winner_id: str | None
