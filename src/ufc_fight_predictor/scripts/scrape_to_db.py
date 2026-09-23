@@ -7,69 +7,87 @@
 #   Extract event -> event
 #   getFights -> list[Fight]
 #   getFighters -> fighterStats, roundstats, etc
-EVENTS_PAGE = "http://www.ufcstats.com/statistics/events/completed"
-from playwright.sync_api import Error as PlaywrightError
 
-from ufc_fight_predictor.data.scraper.browser import fetch_page
-from ufc_fight_predictor.data.scraper.events import extract_events, extract_fight_urls
-from ufc_fight_predictor.data.scraper.fights import (
-    extract_fight,
-    extract_fight_stats,
-    extract_round_stats,
+import json
+from pathlib import Path
+from pydantic import TypeAdapter
+from ufc_fight_predictor.data.database.repository import (
+    save_event,
+    save_fighter,
+    save_fight,
+    save_fight_stats,
+    save_round_stats
 )
-from ufc_fight_predictor.data.scraper.models import (
-    Fight,
-    Fighter,
-    FighterFightStats,
-    RoundStats,
-)
+from ufc_fight_predictor.data.database.connection import SessionLocal
+from ufc_fight_predictor.data.database.connection import engine
+from ufc_fight_predictor.data.database.models import Base
+from ufc_fight_predictor.data.scraper.models import Event, ScrapedFight
 
-event_fight_selector = ".b-statistics__section"
-fight_selector = ".b-fight-details__table"
-html = fetch_page(EVENTS_PAGE, event_fight_selector)
+def load_event(path):
+    with path.open() as file:
+        data = json.load(file)
+    return data
+
+EVENT_PATH = Path("tests/captured_html/events/van_pantoja/event.html")
+FIGHT_PATH = Path("tests/captured_html/events/van_pantoja/fights.html")
+
+Base.metadata.drop_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+
+event_page = load_event(EVENT_PATH)
+domainevent = Event.model_validate(event_page)
+
+fights_page = load_event(FIGHT_PATH)
+fights_page_adapter = TypeAdapter(list[ScrapedFight])
+fights = fights_page_adapter.validate_python(fights_page)
+
+with SessionLocal() as session:
+    event = save_event(session, domainevent)
+    for scrapedfight in fights:
+        fight = scrapedfight.fight
+        fighter_a = fight.fighter_a
+        fighter_b = fight.fighter_b
+        fighter_a_fstats = scrapedfight.fighter_a_fstats
+        fighter_b_fstats = scrapedfight.fighter_b_fstats
+        fighter_a_rstats = scrapedfight.fighter_a_rstats
+        fighter_b_rstats = scrapedfight.fighter_b_rstats
+
+        sa_fighter_a = save_fighter(session, fighter_a)
+        sa_fighter_b = save_fighter(session, fighter_b)
+        saved_fight = save_fight(session,
+                                fight,
+                                event,
+                                sa_fighter_a,
+                                sa_fighter_b)
+        sa_fighter_a_fstats = save_fight_stats(session,
+                                              fighter_a_fstats,
+                                              saved_fight,
+                                              sa_fighter_a)
+        sa_fighter_b_fstats = save_fight_stats(session,
+                                              fighter_b_fstats,
+                                              saved_fight,
+                                              sa_fighter_b)
+        for round_stats in fighter_a_rstats:
+            save_round_stats(
+                session,
+                round_stats,
+                saved_fight,
+                sa_fighter_a,
+            )
+
+        for round_stats in fighter_b_rstats:
+            save_round_stats(
+                session,
+                round_stats,
+                saved_fight,
+                sa_fighter_b,
+            )
+
+    session.commit()
 
 
-events = extract_events(html)
+#shoudl populate fights table
 
 
-van_pantoja = fetch_page(events[0].url, fight_selector)
-print(f"van_pantoja successfully fetched...")
-fight_urls = extract_fight_urls(van_pantoja)
-print(f"fight_urls successfully fetched...")
-#how to store events and fights for mapping? 
-#fight, fighter_a, fighter_b, fight_stats_a, fight_stats_b
-#round_stats_a, round_stats_b
-fights: list[(
-    Fight, 
-    Fighter, 
-    Fighter, 
-    FighterFightStats,
-    FighterFightStats,
-    RoundStats,
-    RoundStats) ] = []
 
-for url in fight_urls:
-    #in fight page
-    try:
-        fight_html = fetch_page(url, ".b-page")
-    except PlaywrightError:
-        print(f"fight_html: {url} unable to be fetched")
-        continue
-    
-    fight = extract_fight(fight_html, url)
-    fighter_a = fight.fighter_a
-    fighter_b = fight.fighter_b
-    fighter_a_fstats = extract_fight_stats(fight_html, fighter_a)
-    fighter_b_fstats = extract_fight_stats(fight_html, fighter_b)
-    fighter_a_rstats = extract_round_stats(fight_html, fighter_a)
-    fighter_b_rstats = extract_round_stats(fight_html, fighter_b)
-    fights.append((fight, 
-    fighter_a, 
-    fighter_b,
-    fighter_a_fstats,
-    fighter_b_fstats,
-    fighter_a_rstats,
-    fighter_b_rstats))
-
-print(fights)
 

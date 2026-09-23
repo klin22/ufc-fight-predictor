@@ -1,6 +1,8 @@
 from __future__ import annotations
 from pydantic import BaseModel
 
+from ufc_fight_predictor.data.database.models import FightStats
+
 class Fighter(BaseModel):
     ufcstats_id: str
     name: str
@@ -92,3 +94,13 @@ class Event(BaseModel):
     location: str
     url: str
     fights: list[Fight]
+
+class ScrapedFight(BaseModel):
+    fight: Fight
+    fighter_a: Fighter
+    fighter_b: Fighter
+    fighter_a_fstats: FighterFightStats
+    fighter_b_fstats: FighterFightStats
+    fighter_a_rstats: list[RoundStats]
+    fighter_b_rstats: list[RoundStats]
+    
