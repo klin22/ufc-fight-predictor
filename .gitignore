@@ -35,3 +35,5 @@ artifacts/
 models/
 
 tests/captured_html/
+
+tasks.md

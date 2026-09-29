@@ -2,13 +2,17 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ufc_fight_predictor.data.database.models import (
     Base,
+    Event,
     Fight,
+    Fighter,
+    FightStats,
+    RoundStats,
 )
 from ufc_fight_predictor.data.database.repository import (
     save_event,
@@ -120,9 +124,7 @@ def test_domain_objects_persist_with_relationships(
     loaded_fight = db_session.scalar(
         select(Fight).where(Fight.ufcstats_id == domain_fight.ufcstats_id)
     )
-    loaded_draw = db_session.scalar(
-        select(Fight).where(Fight.id == draw_record.id)
-    )
+    loaded_draw = db_session.scalar(select(Fight).where(Fight.id == draw_record.id))
 
     assert loaded_fight is not None
     assert loaded_fight.event.ufcstats_id == "fixture-event"
@@ -143,14 +145,14 @@ def test_domain_objects_persist_with_relationships(
 
 
 @pytest.mark.parametrize("duplicate_field", ["event_id", "url"])
-def test_event_external_identifiers_are_unique(
+def test_event_reuses_id_but_rejects_conflicting_url(
     db_session: Session,
     fight_html: str,
     duplicate_field: str,
 ) -> None:
     domain_fight = extract_fight(fight_html, FIGHT_URL)
     event = make_domain_event(domain_fight)
-    save_event(db_session, event)
+    original = save_event(db_session, event)
     db_session.commit()
 
     updates = {
@@ -159,18 +161,23 @@ def test_event_external_identifiers_are_unique(
     }
     updates[duplicate_field] = getattr(event, duplicate_field)
 
-    with pytest.raises(IntegrityError):
-        save_event(db_session, event.model_copy(update=updates))
+    duplicate = event.model_copy(update=updates)
+    if duplicate_field == "event_id":
+        assert save_event(db_session, duplicate) is original
+        assert original.url == event.url
+    else:
+        with pytest.raises(IntegrityError):
+            save_event(db_session, duplicate)
 
 
 @pytest.mark.parametrize("duplicate_field", ["ufcstats_id", "url"])
-def test_fighter_external_identifiers_are_unique(
+def test_fighter_reuses_id_but_rejects_conflicting_url(
     db_session: Session,
     fight_html: str,
     duplicate_field: str,
 ) -> None:
     fighter = extract_fight(fight_html, FIGHT_URL).fighter_a
-    save_fighter(db_session, fighter)
+    original = save_fighter(db_session, fighter)
     db_session.commit()
 
     updates = {
@@ -179,17 +186,22 @@ def test_fighter_external_identifiers_are_unique(
     }
     updates[duplicate_field] = getattr(fighter, duplicate_field)
 
-    with pytest.raises(IntegrityError):
-        save_fighter(db_session, fighter.model_copy(update=updates))
+    duplicate = fighter.model_copy(update=updates)
+    if duplicate_field == "ufcstats_id":
+        assert save_fighter(db_session, duplicate) is original
+        assert original.url == fighter.url
+    else:
+        with pytest.raises(IntegrityError):
+            save_fighter(db_session, duplicate)
 
 
 @pytest.mark.parametrize("duplicate_field", ["ufcstats_id", "url"])
-def test_fight_external_identifiers_are_unique(
+def test_fight_reuses_id_but_rejects_conflicting_url(
     db_session: Session,
     fight_html: str,
     duplicate_field: str,
 ) -> None:
-    domain_fight, event, fighter_a, fighter_b, _ = save_fight_graph(
+    domain_fight, event, fighter_a, fighter_b, original = save_fight_graph(
         db_session,
         fight_html,
     )
@@ -201,43 +213,82 @@ def test_fight_external_identifiers_are_unique(
     }
     updates[duplicate_field] = getattr(domain_fight, duplicate_field)
 
-    with pytest.raises(IntegrityError):
-        save_fight(
-            db_session,
-            domain_fight.model_copy(update=updates),
-            event,
-            fighter_a,
-            fighter_b,
+    duplicate = domain_fight.model_copy(update=updates)
+    if duplicate_field == "ufcstats_id":
+        assert (
+            save_fight(db_session, duplicate, event, fighter_a, fighter_b) is original
         )
+        assert original.url == domain_fight.url
+    else:
+        with pytest.raises(IntegrityError):
+            save_fight(db_session, duplicate, event, fighter_a, fighter_b)
 
 
-def test_fight_stats_are_unique_per_fighter_and_fight(
+@pytest.mark.parametrize("commit", [False, True])
+def test_fight_stats_reuse_existing_record(
     db_session: Session,
     fight_html: str,
+    commit: bool,
 ) -> None:
     domain_fight, _, fighter_a, _, fight = save_fight_graph(
         db_session,
         fight_html,
     )
     stats = extract_fight_stats(fight_html, domain_fight.fighter_a)
-    save_fight_stats(db_session, stats, fight, fighter_a)
-    db_session.commit()
+    original = save_fight_stats(db_session, stats, fight, fighter_a)
+    if commit:
+        db_session.commit()
 
-    with pytest.raises(IntegrityError):
-        save_fight_stats(db_session, stats, fight, fighter_a)
+    changed = stats.model_copy(update={"knockdowns": stats.knockdowns + 1})
+    assert save_fight_stats(db_session, changed, fight, fighter_a) is original
+    assert original.knockdowns == stats.knockdowns
+    assert db_session.scalar(select(func.count()).select_from(FightStats)) == 1
 
 
-def test_round_stats_are_unique_per_round_fighter_and_fight(
+@pytest.mark.parametrize("commit", [False, True])
+def test_round_stats_reuse_existing_record(
     db_session: Session,
     fight_html: str,
+    commit: bool,
 ) -> None:
     domain_fight, _, fighter_a, _, fight = save_fight_graph(
         db_session,
         fight_html,
     )
     stats = extract_round_stats(fight_html, domain_fight.fighter_a)[0]
-    save_round_stats(db_session, stats, fight, fighter_a)
-    db_session.commit()
+    original = save_round_stats(db_session, stats, fight, fighter_a)
+    if commit:
+        db_session.commit()
 
-    with pytest.raises(IntegrityError):
-        save_round_stats(db_session, stats, fight, fighter_a)
+    changed = stats.model_copy(update={"knockdowns": stats.knockdowns + 1})
+    assert save_round_stats(db_session, changed, fight, fighter_a) is original
+    assert original.knockdowns == stats.knockdowns
+    assert db_session.scalar(select(func.count()).select_from(RoundStats)) == 1
+
+    next_round = stats.model_copy(update={"round_number": stats.round_number + 1})
+    assert save_round_stats(db_session, next_round, fight, fighter_a) is not original
+    assert db_session.scalar(select(func.count()).select_from(RoundStats)) == 2
+
+
+@pytest.mark.parametrize("commit", [False, True])
+def test_saving_fight_graph_twice_reuses_records(
+    db_session: Session,
+    fight_html: str,
+    commit: bool,
+) -> None:
+    _, *original_records = save_fight_graph(db_session, fight_html)
+    original_ids = [record.id for record in original_records]
+    if commit:
+        db_session.commit()
+        # Force the second save to find persisted rows outside the identity map.
+        db_session.expunge_all()
+
+    _, *repeated_records = save_fight_graph(db_session, fight_html)
+    assert [record.id for record in repeated_records] == original_ids
+    if not commit:
+        for original, repeated in zip(original_records, repeated_records):
+            assert repeated is original
+
+    assert db_session.scalar(select(func.count()).select_from(Event)) == 1
+    assert db_session.scalar(select(func.count()).select_from(Fighter)) == 2
+    assert db_session.scalar(select(func.count()).select_from(Fight)) == 1
