@@ -1,7 +1,8 @@
 from datetime import date
 from time import strptime
 
-from sqlalchemy.orm import Session, select
+from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from ufc_fight_predictor.data.database.models import (
     Event,
