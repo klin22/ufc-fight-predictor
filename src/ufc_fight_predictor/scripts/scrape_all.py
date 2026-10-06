@@ -46,7 +46,7 @@ if __name__ == "__main__":
     all_events = extract_events(all_html) #list[Event]
     print(f"First 10 events: {all_events[:10]}")
 
-    Base.metadata.drop_all(bind=engine)
+    # Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
     try:
@@ -106,5 +106,6 @@ if __name__ == "__main__":
                 print(f"Event {event.name} processed successfully")
             session.commit()
     except Exception:
+        session.rollback()
         logging.exception("Session exception: {Exception}")
 

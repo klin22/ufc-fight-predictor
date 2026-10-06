@@ -1,12 +1,17 @@
 from __future__ import annotations
-from pydantic import BaseModel
 
-from ufc_fight_predictor.data.database.models import FightStats
+from typing import Self
+
+from pydantic import BaseModel, model_validator
+
+from ufc_fight_predictor.data.outcomes import FightOutcome, validate_fight_outcome
+
 
 class Fighter(BaseModel):
     ufcstats_id: str
     name: str
-    url: str 
+    url: str
+
 
 class Fight(BaseModel):
     ufcstats_id: str
@@ -14,13 +19,25 @@ class Fight(BaseModel):
     event: Event | None = None
     fighter_a: Fighter
     fighter_b: Fighter
+    outcome: FightOutcome
     winner_id: str | None
     weight_class: str
     method: str
     end_round: int
     end_time: str
-    time_format:str
+    time_format: str
     referee: str
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> Self:
+        validate_fight_outcome(
+            self.outcome,
+            self.winner_id,
+            self.fighter_a.ufcstats_id,
+            self.fighter_b.ufcstats_id,
+        )
+        return self
+
 
 class FighterFightStats(BaseModel):
     fighter_id: str
@@ -53,6 +70,7 @@ class FighterFightStats(BaseModel):
     submission_attempts: int
     reversals: int
     control_seconds: int
+
 
 class RoundStats(BaseModel):
     fighter_id: str
@@ -87,6 +105,7 @@ class RoundStats(BaseModel):
     reversals: int
     control_seconds: int
 
+
 class Event(BaseModel):
     event_id: str
     name: str
@@ -94,6 +113,7 @@ class Event(BaseModel):
     location: str
     url: str
     fights: list[Fight]
+
 
 class ScrapedFight(BaseModel):
     fight: Fight
@@ -103,4 +123,3 @@ class ScrapedFight(BaseModel):
     fighter_b_fstats: FighterFightStats
     fighter_a_rstats: list[RoundStats]
     fighter_b_rstats: list[RoundStats]
-    

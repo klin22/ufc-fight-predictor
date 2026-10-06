@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -71,6 +78,21 @@ class Fighter(Base):
 
 class Fight(Base):
     __tablename__ = "fights"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('winner', 'draw', 'no_contest')",
+            name="ck_fights_outcome",
+        ),
+        CheckConstraint(
+            "(outcome = 'winner' AND winner_id IS NOT NULL "
+            "AND winner_id IN (fighter_a_id, fighter_b_id)) OR "
+            "(outcome IN ('draw', 'no_contest') AND winner_id IS NULL)",
+            name="ck_fights_outcome_winner",
+        ),
+        CheckConstraint(
+            "fighter_a_id <> fighter_b_id", name="ck_fights_distinct_participants"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ufcstats_id: Mapped[str] = mapped_column(
@@ -99,6 +121,7 @@ class Fight(Base):
         ForeignKey("fighters.id"),
         nullable=True,
     )
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
     weight_class: Mapped[str] = mapped_column(
         String,
         nullable=False,

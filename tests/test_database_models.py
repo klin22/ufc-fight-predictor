@@ -109,6 +109,7 @@ def test_domain_objects_persist_with_relationships(
             "ufcstats_id": "fixture-draw",
             "url": "http://www.ufcstats.com/fight-details/fixture-draw",
             "winner_id": None,
+            "outcome": "draw",
         }
     )
     draw_record = save_fight(
@@ -132,6 +133,7 @@ def test_domain_objects_persist_with_relationships(
     assert loaded_fight.fighter_a.ufcstats_id == domain_fight.fighter_a.ufcstats_id
     assert loaded_fight.fighter_b.ufcstats_id == domain_fight.fighter_b.ufcstats_id
     assert loaded_fight.winner is not None
+    assert loaded_fight.outcome == "winner"
     assert loaded_fight.winner.ufcstats_id == domain_fight.winner_id
     assert loaded_fight.end_round == domain_fight.end_round
     assert len(loaded_fight.stats) == 2
@@ -142,6 +144,7 @@ def test_domain_objects_persist_with_relationships(
     assert loaded_draw is not None
     assert loaded_draw.winner_id is None
     assert loaded_draw.winner is None
+    assert loaded_draw.outcome == "draw"
 
 
 @pytest.mark.parametrize("duplicate_field", ["event_id", "url"])
@@ -292,3 +295,70 @@ def test_saving_fight_graph_twice_reuses_records(
     assert db_session.scalar(select(func.count()).select_from(Event)) == 1
     assert db_session.scalar(select(func.count()).select_from(Fighter)) == 2
     assert db_session.scalar(select(func.count()).select_from(Fight)) == 1
+
+
+@pytest.mark.parametrize(
+    "outcome,method",
+    [
+        ("draw", "Decision - Majority"),
+        ("no_contest", "Overturned"),
+    ],
+)
+def test_rescrape_updates_result_without_duplicating_fight(
+    db_session, fight_html, outcome, method
+):
+    domain, event, fighter_a, fighter_b, record = save_fight_graph(
+        db_session, fight_html
+    )
+    record_id = record.id
+    db_session.commit()
+    corrected = domain.model_copy(
+        update={
+            "outcome": outcome,
+            "winner_id": None,
+            "method": method,
+        }
+    )
+    assert save_fight(db_session, corrected, event, fighter_a, fighter_b) is record
+    db_session.commit()
+    db_session.expire_all()
+    assert record.id == record_id
+    assert record.outcome == outcome
+    assert record.winner_id is None
+    assert record.method == method
+    assert db_session.scalar(select(func.count()).select_from(Fight)) == 1
+
+
+def test_repository_revalidates_copied_fight_before_existing_lookup(
+    db_session, fight_html
+):
+    domain, event, fighter_a, fighter_b, _ = save_fight_graph(db_session, fight_html)
+    invalid = domain.model_copy(update={"outcome": "draw"})
+    with pytest.raises(ValueError, match="winner_id=None"):
+        save_fight(db_session, invalid, event, fighter_a, fighter_b)
+
+
+@pytest.mark.parametrize(
+    "outcome,winner",
+    [
+        ("unknown", None),
+        (None, None),
+        ("winner", None),
+        ("draw", "participant"),
+        ("no_contest", "participant"),
+        ("winner", "outsider"),
+    ],
+)
+def test_database_rejects_invalid_results(db_session, fight_html, outcome, winner):
+    _, _, fighter_a, _, record = save_fight_graph(db_session, fight_html)
+    record.outcome = outcome
+    record.winner_id = (
+        fighter_a.id
+        if winner == "participant"
+        else 999
+        if winner == "outsider"
+        else None
+    )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+    db_session.rollback()

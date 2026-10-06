@@ -1,8 +1,8 @@
 from datetime import date
 from time import strptime
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ufc_fight_predictor.data.database.models import (
     Event,
@@ -11,6 +11,7 @@ from ufc_fight_predictor.data.database.models import (
     FightStats,
     RoundStats,
 )
+from ufc_fight_predictor.data.outcomes import validate_fight_outcome
 from ufc_fight_predictor.data.scraper.models import (
     Event as DomainEvent,
 )
@@ -75,14 +76,10 @@ def save_event(session: Session, event: DomainEvent) -> Event:
         location=event.location,
         url=event.url,
     )
-    existing = session.scalar(
-            select(Event).where(
-            Event.ufcstats_id == event.event_id
-        )
-    )
+    existing = session.scalar(select(Event).where(Event.ufcstats_id == event.event_id))
     if existing is not None:
         return existing
-    
+
     session.add(record)
     session.flush()
     return record
@@ -95,14 +92,12 @@ def save_fighter(session: Session, fighter: DomainFighter) -> Fighter:
         url=fighter.url,
     )
     existing = session.scalar(
-        select(Fighter).where(
-            Fighter.ufcstats_id == fighter.ufcstats_id
-        )
+        select(Fighter).where(Fighter.ufcstats_id == fighter.ufcstats_id)
     )
 
     if existing is not None:
         return existing
-    
+
     session.add(record)
     session.flush()
     return record
@@ -119,15 +114,14 @@ def save_fight(
         raise ValueError("fighter_a does not match the domain fight")
     if fighter_b.ufcstats_id != fight.fighter_b.ufcstats_id:
         raise ValueError("fighter_b does not match the domain fight")
-    
-    existing = session.scalar(
-        select(Fight).where(
-            Fight.ufcstats_id == fight.ufcstats_id
-        )
+    # Also validate model_copy()/model_construct() inputs, which can bypass Pydantic.
+    validate_fight_outcome(
+        fight.outcome, fight.winner_id, fighter_a.ufcstats_id, fighter_b.ufcstats_id
     )
-    if existing is not None:
-        return existing
-    
+
+    existing = session.scalar(
+        select(Fight).where(Fight.ufcstats_id == fight.ufcstats_id)
+    )
     fighters = {
         fighter_a.ufcstats_id: fighter_a,
         fighter_b.ufcstats_id: fighter_b,
@@ -138,6 +132,20 @@ def save_fight(
         if winner is None:
             raise ValueError("winner_id does not match either fight participant")
 
+    if existing is not None:
+        if (
+            existing.event_id != event.id
+            or existing.fighter_a_id != fighter_a.id
+            or existing.fighter_b_id != fighter_b.id
+        ):
+            raise ValueError("Existing fight has different event or participants")
+        # Refresh results so re-scraping can backfill outcomes or record overturns.
+        existing.outcome = fight.outcome
+        existing.winner = winner
+        existing.method = fight.method
+        session.flush()
+        return existing
+
     record = Fight(
         ufcstats_id=fight.ufcstats_id,
         url=fight.url,
@@ -145,6 +153,7 @@ def save_fight(
         fighter_a=fighter_a,
         fighter_b=fighter_b,
         winner=winner,
+        outcome=fight.outcome,
         weight_class=fight.weight_class,
         method=fight.method,
         end_round=int(fight.end_round),
@@ -165,17 +174,16 @@ def save_fight_stats(
 ) -> FightStats:
     if stats.fighter_id != fighter.ufcstats_id:
         raise ValueError("fighter does not match the fight stats")
-    
+
     existing = session.scalar(
         select(FightStats).where(
-            FightStats.fight_id  == fight.id,
-            FightStats.fighter_id == fighter.id
+            FightStats.fight_id == fight.id, FightStats.fighter_id == fighter.id
         )
     )
 
     if existing is not None:
-        return existing 
-    
+        return existing
+
     record = FightStats(
         fight=fight,
         fighter=fighter,
@@ -199,12 +207,12 @@ def save_round_stats(
         select(RoundStats).where(
             RoundStats.fight_id == fight.id,
             RoundStats.fighter_id == fighter.id,
-            RoundStats.round_number == stats.round_number
+            RoundStats.round_number == stats.round_number,
         )
     )
     if existing is not None:
         return existing
-    
+
     record = RoundStats(
         fight=fight,
         fighter=fighter,

@@ -37,3 +37,5 @@ models/
 tests/captured_html/
 
 tasks.md
+
+*.csv

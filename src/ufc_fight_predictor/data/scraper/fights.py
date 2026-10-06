@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 
+from ufc_fight_predictor.data.outcomes import FightOutcome
 from ufc_fight_predictor.data.scraper.models import (
     Fight,
     Fighter,
@@ -9,11 +10,15 @@ from ufc_fight_predictor.data.scraper.models import (
 
 FIGHTER_SELECTOR = "a.b-fight-details__person-link"
 REQUIRED_TOTAL_COLUMNS = {
-    "kd", "sig. str", "total str", "td", "sub. att", "rev", "ctrl"
+    "kd",
+    "sig. str",
+    "total str",
+    "td",
+    "sub. att",
+    "rev",
+    "ctrl",
 }
-REQUIRED_SIGNIFICANT_COLUMNS = {
-    "head", "body", "leg", "distance", "clinch", "ground"
-}
+REQUIRED_SIGNIFICANT_COLUMNS = {"head", "body", "leg", "distance", "clinch", "ground"}
 
 
 def _parse_pair(value: str, field: str) -> tuple[int, int]:
@@ -38,9 +43,7 @@ def _parse_control_seconds(value: str, field: str) -> int:
 
 def extract_fighters(html: str) -> list[Fighter]:
     soup = BeautifulSoup(html, "lxml")
-    fighter_links = soup.select(
-        FIGHTER_SELECTOR
-    )
+    fighter_links = soup.select(FIGHTER_SELECTOR)
 
     fighters = []
 
@@ -57,36 +60,62 @@ def extract_fighters(html: str) -> list[Fighter]:
 
     return fighters
 
-def extract_winner_id(html:str)-> str | None:
+
+def extract_fight_outcome(html: str) -> tuple[FightOutcome, str | None]:
+    """Read both result markers; missing results are not draws or no contests."""
     soup = BeautifulSoup(html, "lxml")
-    for person in soup.select(".b-fight-details__person"):
+    people = soup.select(".b-fight-details__person")
+    if len(people) != 2:
+        raise ValueError("Expected exactly two fight participants")
+
+    results = []
+    for person in people:
         link = person.select_one("a.b-fight-details__person-link")
         status_el = person.select_one(".b-fight-details__person-status")
         if link is None or status_el is None:
-            continue
+            raise ValueError("Missing fighter link or result marker")
+        url = link.get("href")
+        if not isinstance(url, str) or not url.rstrip("/"):
+            raise ValueError("Missing fighter URL")
         status = status_el.get_text(strip=True).upper()
-        if status == "W":
-            url = link["href"]
-            return url.rstrip("/").split("/")[-1]
-    return None
-#helper
-def extract_fight_metadata(html:str) -> tuple[
-    str, str, str, str, str, str]:
+        results.append((url.rstrip("/").split("/")[-1], status))
+
+    if results[0][0] == results[1][0]:
+        raise ValueError("A fight must have two distinct participants")
+    statuses = (results[0][1], results[1][1])
+    if statuses == ("W", "L"):
+        return "winner", results[0][0]
+    if statuses == ("L", "W"):
+        return "winner", results[1][0]
+    if statuses == ("D", "D"):
+        return "draw", None
+    if statuses == ("NC", "NC"):
+        return "no_contest", None
+    raise ValueError(f"Invalid or unrecognized fight result markers: {statuses!r}")
+
+
+def extract_winner_id(html: str) -> str | None:
+    """Compatibility wrapper with the same strict result validation."""
+    return extract_fight_outcome(html)[1]
+
+
+# helper
+def extract_fight_metadata(html: str) -> tuple[str, str, str, str, str, str]:
     soup = BeautifulSoup(html, "lxml")
     weight_el = soup.select_one(".b-fight-details__fight-title").get_text()
     if weight_el is None:
         raise ValueError("No weight value for this element")
 
     values = {}
-    for item in soup.select(".b-fight-details__text-item_first, " 
-                            ".b-fight-details__text-item"):
-
+    for item in soup.select(
+        ".b-fight-details__text-item_first, .b-fight-details__text-item"
+    ):
         text = item.get_text(" ", strip=True)
-        key, separator, value = text.partition(":")
+        key, _separator, value = text.partition(":")
         if key.strip().lower() == "time format":
             value = value.split("(", 1)[0].strip()
         values[key.strip().lower()] = value.strip()
-    
+
     required = {"method", "round", "time", "time format", "referee"}
     missing = [key for key in required if not values.get(key)]
     if missing:
@@ -99,27 +128,32 @@ def extract_fight_metadata(html:str) -> tuple[
         values["round"],
         values["time"],
         values["time format"],
-        values["referee"]
+        values["referee"],
     )
-#extracts fight
-def extract_fight(html:str, url:str) -> Fight:
+
+
+# extracts fight
+def extract_fight(html: str, url: str) -> Fight:
     fighters = extract_fighters(html)
-    winner_id = extract_winner_id(html)
-    weight, method, round, time, time_format, referee = (extract_fight_metadata(html))
+    outcome, winner_id = extract_fight_outcome(html)
+    weight, method, round, time, time_format, referee = extract_fight_metadata(html)
 
     return Fight(
         ufcstats_id=url.rstrip("/").split("/")[-1],
         url=url,
         fighter_a=fighters[0],
         fighter_b=fighters[1],
+        outcome=outcome,
         winner_id=winner_id,
         weight_class=weight,
         method=method,
         end_round=round,
         end_time=time,
         time_format=time_format,
-        referee=referee
+        referee=referee,
     )
+
+
 def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
     soup = BeautifulSoup(html, "lxml")
     fighter_tables = {}
@@ -161,7 +195,9 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
         for column_name, cell in zip(headers, cells):
             fighter_values = cell.select("p.b-fight-details__table-text")
             if fighter_index >= len(fighter_values):
-                raise ValueError(f"Missing {column_name} value for {fighter.ufcstats_id}")
+                raise ValueError(
+                    f"Missing {column_name} value for {fighter.ufcstats_id}"
+                )
             values[column_name] = fighter_values[fighter_index].get_text(
                 " ", strip=True
             )
@@ -182,14 +218,10 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
         | REQUIRED_SIGNIFICANT_COLUMNS - significant.keys()
     )
     if missing_columns:
-        raise ValueError(
-            f"Missing stat columns: {', '.join(sorted(missing_columns))}"
-        )
+        raise ValueError(f"Missing stat columns: {', '.join(sorted(missing_columns))}")
 
     sig_landed, sig_attempted = _parse_pair(totals["sig. str"], "sig. str")
-    total_landed, total_attempted = _parse_pair(
-        totals["total str"], "total str"
-    )
+    total_landed, total_attempted = _parse_pair(totals["total str"], "total str")
     td_landed, td_attempted = _parse_pair(totals["td"], "td")
     head_landed, head_attempted = _parse_pair(significant["head"], "head")
     body_landed, body_attempted = _parse_pair(significant["body"], "body")
@@ -197,12 +229,8 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
     distance_landed, distance_attempted = _parse_pair(
         significant["distance"], "distance"
     )
-    clinch_landed, clinch_attempted = _parse_pair(
-        significant["clinch"], "clinch"
-    )
-    ground_landed, ground_attempted = _parse_pair(
-        significant["ground"], "ground"
-    )
+    clinch_landed, clinch_attempted = _parse_pair(significant["clinch"], "clinch")
+    ground_landed, ground_attempted = _parse_pair(significant["ground"], "ground")
 
     try:
         control_seconds = _parse_control_seconds(totals["ctrl"], "ctrl")
@@ -259,19 +287,15 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
         else:
             continue
 
-        round_headers = table.select(
-            "thead.b-fight-details__table-row_type_head"
-        )
-        rows = table.select(
-            "tbody tr.b-fight-details__table-row"
-        )
+        round_headers = table.select("thead.b-fight-details__table-row_type_head")
+        rows = table.select("tbody tr.b-fight-details__table-row")
         if len(round_headers) != len(rows):
             raise ValueError(f"Unexpected per-round {table_name} table structure")
 
         for round_header, row in zip(round_headers, rows):
-            label, separator, number = round_header.get_text(
-                " ", strip=True
-            ).lower().partition(" ")
+            label, separator, number = (
+                round_header.get_text(" ", strip=True).lower().partition(" ")
+            )
             if label != "round" or not separator:
                 raise ValueError("Invalid round heading")
             try:
@@ -302,9 +326,7 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
                         f"Missing round {round_number} {column_name} value for "
                         f"{fighter.ufcstats_id}"
                     )
-                value = fighter_values[
-                    fighter_index
-                ].get_text(" ", strip=True)
+                value = fighter_values[fighter_index].get_text(" ", strip=True)
                 if column_name == "td %" and " of " in value:
                     column_name = "td"
                 values[column_name] = value
@@ -342,9 +364,7 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
         total_landed, total_attempted = _parse_pair(
             totals["total str"], f"round {round_number} total str"
         )
-        td_landed, td_attempted = _parse_pair(
-            totals["td"], f"round {round_number} td"
-        )
+        td_landed, td_attempted = _parse_pair(totals["td"], f"round {round_number} td")
         head_landed, head_attempted = _parse_pair(
             significant["head"], f"round {round_number} head"
         )
@@ -373,8 +393,7 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
             reversals = int(totals["rev"])
         except ValueError as error:
             raise ValueError(
-                f"Invalid numeric round {round_number} stats for "
-                f"{fighter.ufcstats_id}"
+                f"Invalid numeric round {round_number} stats for {fighter.ufcstats_id}"
             ) from error
 
         rounds.append(

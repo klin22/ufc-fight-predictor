@@ -299,7 +299,6 @@ def test_comprehensive():
         for field_name in (
             "weight_class",
             "method",
-            "end_round",
             "end_time",
             "time_format",
             "referee",
@@ -307,7 +306,7 @@ def test_comprehensive():
             value = getattr(fight, field_name)
             assert value.strip(), f"{context}: {field_name} is empty"
 
-        assert fight.end_round.isdigit(), (
+        assert isinstance(fight.end_round, int), (
             f"{context}: invalid end round {fight.end_round!r}"
         )
         end_round = int(fight.end_round)
