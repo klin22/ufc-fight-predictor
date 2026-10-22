@@ -147,6 +147,31 @@ def test_domain_objects_persist_with_relationships(
     assert loaded_draw.outcome == "draw"
 
 
+@pytest.mark.parametrize("per_round", [False, True])
+def test_retry_fills_missing_stats_without_overwriting_known_values(
+    db_session, fight_html, per_round
+):
+    domain_fight, _, fighter_a, _, fight = save_fight_graph(db_session, fight_html)
+    if per_round:
+        stats = extract_round_stats(fight_html, domain_fight.fighter_a)[0]
+        save = save_round_stats
+    else:
+        stats = extract_fight_stats(fight_html, domain_fight.fighter_a)
+        save = save_fight_stats
+    partial = stats.model_copy(update={"knockdowns": None})
+    record = save(db_session, partial, fight, fighter_a)
+    db_session.commit()
+    assert record.knockdowns is None
+
+    retry = stats.model_copy(update={"control_seconds": None, "sig_strikes_landed": 999})
+    assert save(db_session, retry, fight, fighter_a) is record
+    db_session.commit()
+    db_session.refresh(record)
+    assert record.knockdowns == stats.knockdowns
+    assert record.control_seconds == stats.control_seconds
+    assert record.sig_strikes_landed == stats.sig_strikes_landed
+
+
 @pytest.mark.parametrize("duplicate_field", ["event_id", "url"])
 def test_event_reuses_id_but_rejects_conflicting_url(
     db_session: Session,

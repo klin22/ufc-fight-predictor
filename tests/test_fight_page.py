@@ -219,8 +219,12 @@ def test_extract_round_stats_missing_column():
                 cell.string = "torso"
 
     fighter = extract_fighters(html)[0]
-    with pytest.raises(ValueError, match="body"):
-        extract_round_stats(str(soup), fighter)
+    rounds = extract_round_stats(str(soup), fighter)
+    assert len(rounds) == 3
+    assert all(
+        stats.body_landed is None and stats.body_attempted is None for stats in rounds
+    )
+    assert rounds[0].sig_strikes_landed == 39
 
 
 def test_comprehensive():

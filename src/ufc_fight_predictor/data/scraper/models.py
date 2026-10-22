@@ -42,68 +42,38 @@ class Fight(BaseModel):
 class FighterFightStats(BaseModel):
     fighter_id: str
 
-    knockdowns: int
+    knockdowns: int | None
 
-    sig_strikes_landed: int
-    sig_strikes_attempted: int
+    sig_strikes_landed: int | None
+    sig_strikes_attempted: int | None
 
-    head_landed: int
-    head_attempted: int
-    body_landed: int
-    body_attempted: int
-    leg_landed: int
-    leg_attempted: int
+    head_landed: int | None
+    head_attempted: int | None
+    body_landed: int | None
+    body_attempted: int | None
+    leg_landed: int | None
+    leg_attempted: int | None
 
-    distance_landed: int
-    distance_attempted: int
-    clinch_landed: int
-    clinch_attempted: int
-    ground_landed: int
-    ground_attempted: int
+    distance_landed: int | None
+    distance_attempted: int | None
+    clinch_landed: int | None
+    clinch_attempted: int | None
+    ground_landed: int | None
+    ground_attempted: int | None
 
-    total_strikes_landed: int
-    total_strikes_attempted: int
+    total_strikes_landed: int | None
+    total_strikes_attempted: int | None
 
-    takedowns_landed: int
-    takedowns_attempted: int
+    takedowns_landed: int | None
+    takedowns_attempted: int | None
 
-    submission_attempts: int
-    reversals: int
-    control_seconds: int
+    submission_attempts: int | None
+    reversals: int | None
+    control_seconds: int | None
 
 
-class RoundStats(BaseModel):
-    fighter_id: str
+class RoundStats(FighterFightStats):
     round_number: int
-
-    knockdowns: int
-
-    sig_strikes_landed: int
-    sig_strikes_attempted: int
-
-    head_landed: int
-    head_attempted: int
-    body_landed: int
-    body_attempted: int
-    leg_landed: int
-    leg_attempted: int
-
-    distance_landed: int
-    distance_attempted: int
-    clinch_landed: int
-    clinch_attempted: int
-    ground_landed: int
-    ground_attempted: int
-
-    total_strikes_landed: int
-    total_strikes_attempted: int
-
-    takedowns_landed: int
-    takedowns_attempted: int
-
-    submission_attempts: int
-    reversals: int
-    control_seconds: int
 
 
 class Event(BaseModel):
@@ -119,7 +89,7 @@ class ScrapedFight(BaseModel):
     fight: Fight
     fighter_a: Fighter
     fighter_b: Fighter
-    fighter_a_fstats: FighterFightStats
-    fighter_b_fstats: FighterFightStats
+    fighter_a_fstats: FighterFightStats | None
+    fighter_b_fstats: FighterFightStats | None
     fighter_a_rstats: list[RoundStats]
     fighter_b_rstats: list[RoundStats]

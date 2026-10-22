@@ -9,29 +9,30 @@ from ufc_fight_predictor.data.scraper.models import (
 )
 
 FIGHTER_SELECTOR = "a.b-fight-details__person-link"
-REQUIRED_TOTAL_COLUMNS = {
-    "kd",
-    "sig. str",
-    "total str",
-    "td",
-    "sub. att",
-    "rev",
-    "ctrl",
-}
-REQUIRED_SIGNIFICANT_COLUMNS = {"head", "body", "leg", "distance", "clinch", "ground"}
 
 
-def _parse_pair(value: str, field: str) -> tuple[int, int]:
-    landed, separator, attempted = value.partition(" of ")
-    if not separator:
-        raise ValueError(f"Invalid {field} value: {value}")
+def _parse_int(value: str | None, field: str) -> int | None:
+    if value is None or value.strip() in {"", "--"}:
+        return None
     try:
-        return int(landed), int(attempted)
+        return int(value)
     except ValueError as error:
         raise ValueError(f"Invalid {field} value: {value}") from error
 
 
-def _parse_control_seconds(value: str, field: str) -> int:
+def _parse_pair(value: str | None, field: str) -> tuple[int | None, int | None]:
+    if value is None or value.strip() in {"", "--"}:
+        return None, None
+    landed, separator, attempted = value.partition(" of ")
+    if not separator:
+        raise ValueError(f"Invalid {field} value: {value}")
+    return _parse_int(landed, field), _parse_int(attempted, field)
+
+
+def _parse_control_seconds(value: str | None, field: str) -> int | None:
+    # An unavailable control time is distinct from a measured 0:00.
+    if value is None or value.strip() in {"", "--"}:
+        return None
     minutes, separator, seconds = value.partition(":")
     if not separator:
         raise ValueError(f"Invalid {field} value: {value}")
@@ -39,6 +40,40 @@ def _parse_control_seconds(value: str, field: str) -> int:
         return int(minutes) * 60 + int(seconds)
     except ValueError as error:
         raise ValueError(f"Invalid {field} value: {value}") from error
+
+
+def _parse_stats(
+    totals: dict[str, str | None], significant: dict[str, str | None]
+) -> dict[str, int | None]:
+    values = {
+        name: _parse_int(totals.get(column), column)
+        for name, column in (
+            ("knockdowns", "kd"),
+            ("submission_attempts", "sub. att"),
+            ("reversals", "rev"),
+        )
+    }
+    values["control_seconds"] = _parse_control_seconds(totals.get("ctrl"), "ctrl")
+    pairs = {
+        "sig_strikes": totals.get("sig. str"),
+        "total_strikes": totals.get("total str"),
+        "takedowns": totals.get("td"),
+        **{
+            name: significant.get(name)
+            for name in ("head", "body", "leg", "distance", "clinch", "ground")
+        },
+    }
+    for name, value in pairs.items():
+        values[f"{name}_landed"], values[f"{name}_attempted"] = _parse_pair(value, name)
+    return values
+
+
+def _validate_fighter(soup: BeautifulSoup, fighter: Fighter) -> None:
+    if not any(
+        link.get("href", "").rstrip("/").split("/")[-1] == fighter.ufcstats_id
+        for link in soup.select(FIGHTER_SELECTOR)
+    ):
+        raise ValueError(f"Fighter {fighter.ufcstats_id} is missing from the page")
 
 
 def extract_fighters(html: str) -> list[Fighter]:
@@ -154,8 +189,9 @@ def extract_fight(html: str, url: str) -> Fight:
     )
 
 
-def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
+def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats | None:
     soup = BeautifulSoup(html, "lxml")
+    _validate_fighter(soup, fighter)
     fighter_tables = {}
 
     for table in soup.find_all("table"):
@@ -168,9 +204,11 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
             cell.get_text(" ", strip=True).lower().rstrip(".")
             for cell in header.find_all("th")
         ]
-        if "kd" in headers:
+        if {"kd", "total str", "ctrl"}.intersection(headers):
             table_name = "totals"
-        elif "head" in headers:
+        elif {"head", "body", "leg", "distance", "clinch", "ground"}.intersection(
+            headers
+        ):
             table_name = "significant"
         else:
             continue
@@ -195,80 +233,33 @@ def extract_fight_stats(html: str, fighter: Fighter) -> FighterFightStats:
         for column_name, cell in zip(headers, cells):
             fighter_values = cell.select("p.b-fight-details__table-text")
             if fighter_index >= len(fighter_values):
-                raise ValueError(
-                    f"Missing {column_name} value for {fighter.ufcstats_id}"
-                )
+                values[column_name] = None
+                continue
             values[column_name] = fighter_values[fighter_index].get_text(
                 " ", strip=True
             )
         fighter_tables[table_name] = values
 
-    missing_tables = {"totals", "significant"} - fighter_tables.keys()
-    if missing_tables:
-        raise ValueError(
-            f"Missing {', '.join(sorted(missing_tables))} stats for "
-            f"{fighter.ufcstats_id}"
-        )
-
-    totals = fighter_tables["totals"]
-    significant = fighter_tables["significant"]
-
-    missing_columns = (
-        REQUIRED_TOTAL_COLUMNS - totals.keys()
-        | REQUIRED_SIGNIFICANT_COLUMNS - significant.keys()
-    )
-    if missing_columns:
-        raise ValueError(f"Missing stat columns: {', '.join(sorted(missing_columns))}")
-
-    sig_landed, sig_attempted = _parse_pair(totals["sig. str"], "sig. str")
-    total_landed, total_attempted = _parse_pair(totals["total str"], "total str")
-    td_landed, td_attempted = _parse_pair(totals["td"], "td")
-    head_landed, head_attempted = _parse_pair(significant["head"], "head")
-    body_landed, body_attempted = _parse_pair(significant["body"], "body")
-    leg_landed, leg_attempted = _parse_pair(significant["leg"], "leg")
-    distance_landed, distance_attempted = _parse_pair(
-        significant["distance"], "distance"
-    )
-    clinch_landed, clinch_attempted = _parse_pair(significant["clinch"], "clinch")
-    ground_landed, ground_attempted = _parse_pair(significant["ground"], "ground")
+    if not fighter_tables:
+        return None
 
     try:
-        control_seconds = _parse_control_seconds(totals["ctrl"], "ctrl")
-        knockdowns = int(totals["kd"])
-        submission_attempts = int(totals["sub. att"])
-        reversals = int(totals["rev"])
+        values = _parse_stats(
+            fighter_tables.get("totals", {}), fighter_tables.get("significant", {})
+        )
     except ValueError as error:
-        raise ValueError(f"Invalid numeric stats for {fighter.ufcstats_id}") from error
+        raise ValueError(
+            f"Invalid numeric stats for {fighter.ufcstats_id}: {error}"
+        ) from error
 
-    return FighterFightStats(
-        fighter_id=fighter.ufcstats_id,
-        knockdowns=knockdowns,
-        sig_strikes_landed=sig_landed,
-        sig_strikes_attempted=sig_attempted,
-        head_landed=head_landed,
-        head_attempted=head_attempted,
-        body_landed=body_landed,
-        body_attempted=body_attempted,
-        leg_landed=leg_landed,
-        leg_attempted=leg_attempted,
-        distance_landed=distance_landed,
-        distance_attempted=distance_attempted,
-        clinch_landed=clinch_landed,
-        clinch_attempted=clinch_attempted,
-        ground_landed=ground_landed,
-        ground_attempted=ground_attempted,
-        total_strikes_landed=total_landed,
-        total_strikes_attempted=total_attempted,
-        takedowns_landed=td_landed,
-        takedowns_attempted=td_attempted,
-        submission_attempts=submission_attempts,
-        reversals=reversals,
-        control_seconds=control_seconds,
-    )
+    if all(value is None for value in values.values()):
+        return None
+    return FighterFightStats(fighter_id=fighter.ufcstats_id, **values)
 
 
 def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
     soup = BeautifulSoup(html, "lxml")
+    _validate_fighter(soup, fighter)
     round_tables = {}
 
     for table in soup.find_all("table"):
@@ -280,9 +271,11 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
             cell.get_text(" ", strip=True).lower().rstrip(".")
             for cell in header.find_all("th")
         ]
-        if "kd" in headers:
+        if {"kd", "total str", "ctrl"}.intersection(headers):
             table_name = "totals"
-        elif "head" in headers:
+        elif {"head", "body", "leg", "distance", "clinch", "ground"}.intersection(
+            headers
+        ):
             table_name = "significant"
         else:
             continue
@@ -322,10 +315,8 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
             for column_name, cell in zip(headers, cells):
                 fighter_values = cell.select("p.b-fight-details__table-text")
                 if fighter_index >= len(fighter_values):
-                    raise ValueError(
-                        f"Missing round {round_number} {column_name} value for "
-                        f"{fighter.ufcstats_id}"
-                    )
+                    values[column_name] = None
+                    continue
                 value = fighter_values[fighter_index].get_text(" ", strip=True)
                 if column_name == "td %" and " of " in value:
                     column_name = "td"
@@ -333,95 +324,25 @@ def extract_round_stats(html: str, fighter: Fighter) -> list[RoundStats]:
 
             round_tables.setdefault(round_number, {})[table_name] = values
 
-    if not round_tables:
-        raise ValueError(f"Missing round stats for {fighter.ufcstats_id}")
-
     rounds = []
     for round_number, tables in sorted(round_tables.items()):
-        missing_tables = {"totals", "significant"} - tables.keys()
-        if missing_tables:
-            raise ValueError(
-                f"Missing round {round_number} "
-                f"{', '.join(sorted(missing_tables))} stats for "
-                f"{fighter.ufcstats_id}"
-            )
-
-        totals = tables["totals"]
-        significant = tables["significant"]
-        missing_columns = (
-            REQUIRED_TOTAL_COLUMNS - totals.keys()
-            | REQUIRED_SIGNIFICANT_COLUMNS - significant.keys()
-        )
-        if missing_columns:
-            raise ValueError(
-                f"Missing round {round_number} stat columns: "
-                f"{', '.join(sorted(missing_columns))}"
-            )
-
-        sig_landed, sig_attempted = _parse_pair(
-            totals["sig. str"], f"round {round_number} sig. str"
-        )
-        total_landed, total_attempted = _parse_pair(
-            totals["total str"], f"round {round_number} total str"
-        )
-        td_landed, td_attempted = _parse_pair(totals["td"], f"round {round_number} td")
-        head_landed, head_attempted = _parse_pair(
-            significant["head"], f"round {round_number} head"
-        )
-        body_landed, body_attempted = _parse_pair(
-            significant["body"], f"round {round_number} body"
-        )
-        leg_landed, leg_attempted = _parse_pair(
-            significant["leg"], f"round {round_number} leg"
-        )
-        distance_landed, distance_attempted = _parse_pair(
-            significant["distance"], f"round {round_number} distance"
-        )
-        clinch_landed, clinch_attempted = _parse_pair(
-            significant["clinch"], f"round {round_number} clinch"
-        )
-        ground_landed, ground_attempted = _parse_pair(
-            significant["ground"], f"round {round_number} ground"
-        )
-
         try:
-            control_seconds = _parse_control_seconds(
-                totals["ctrl"], f"round {round_number} ctrl"
+            values = _parse_stats(
+                tables.get("totals", {}), tables.get("significant", {})
             )
-            knockdowns = int(totals["kd"])
-            submission_attempts = int(totals["sub. att"])
-            reversals = int(totals["rev"])
         except ValueError as error:
             raise ValueError(
-                f"Invalid numeric round {round_number} stats for {fighter.ufcstats_id}"
+                f"Invalid numeric round {round_number} stats for {fighter.ufcstats_id}: "
+                f"{error}"
             ) from error
 
+        if all(value is None for value in values.values()):
+            continue
         rounds.append(
             RoundStats(
                 fighter_id=fighter.ufcstats_id,
                 round_number=round_number,
-                knockdowns=knockdowns,
-                sig_strikes_landed=sig_landed,
-                sig_strikes_attempted=sig_attempted,
-                head_landed=head_landed,
-                head_attempted=head_attempted,
-                body_landed=body_landed,
-                body_attempted=body_attempted,
-                leg_landed=leg_landed,
-                leg_attempted=leg_attempted,
-                distance_landed=distance_landed,
-                distance_attempted=distance_attempted,
-                clinch_landed=clinch_landed,
-                clinch_attempted=clinch_attempted,
-                ground_landed=ground_landed,
-                ground_attempted=ground_attempted,
-                total_strikes_landed=total_landed,
-                total_strikes_attempted=total_attempted,
-                takedowns_landed=td_landed,
-                takedowns_attempted=td_attempted,
-                submission_attempts=submission_attempts,
-                reversals=reversals,
-                control_seconds=control_seconds,
+                **values,
             )
         )
 

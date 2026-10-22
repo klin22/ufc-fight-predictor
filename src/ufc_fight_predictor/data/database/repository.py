@@ -64,8 +64,16 @@ def _parse_event_date(value: str) -> date:
 
 def _stat_values(
     stats: DomainFightStats | DomainRoundStats,
-) -> dict[str, int]:
+) -> dict[str, int | None]:
     return {field: getattr(stats, field) for field in STAT_FIELDS}
+
+
+def _fill_missing_stats(
+    record: FightStats | RoundStats, stats: DomainFightStats
+) -> None:
+    for field, value in _stat_values(stats).items():
+        if getattr(record, field) is None:
+            setattr(record, field, value)
 
 
 def save_event(session: Session, event: DomainEvent) -> Event:
@@ -168,10 +176,12 @@ def save_fight(
 
 def save_fight_stats(
     session: Session,
-    stats: DomainFightStats,
+    stats: DomainFightStats | None,
     fight: Fight,
     fighter: Fighter,
-) -> FightStats:
+) -> FightStats | None:
+    if stats is None:
+        return None
     if stats.fighter_id != fighter.ufcstats_id:
         raise ValueError("fighter does not match the fight stats")
 
@@ -182,6 +192,7 @@ def save_fight_stats(
     )
 
     if existing is not None:
+        _fill_missing_stats(existing, stats)
         return existing
 
     record = FightStats(
@@ -211,6 +222,7 @@ def save_round_stats(
         )
     )
     if existing is not None:
+        _fill_missing_stats(existing, stats)
         return existing
 
     record = RoundStats(
