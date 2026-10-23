@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ufc_fight_predictor.data.scraper.browser import fetch_page
+from ufc_fight_predictor.data.scraper.browsersession import BrowserSession
 from ufc_fight_predictor.data.scraper.events import extract_events, extract_fight_urls
 from ufc_fight_predictor.data.scraper.models import Fight
 from ufc_fight_predictor.data.scraper.fights import extract_fight
@@ -39,20 +39,25 @@ def test_extract_fight_urls():
     assert fight_urls[0] == "http://www.ufcstats.com/fight-details/228fefc6923c40a5"
 
 def test_extract_all_events_fights():
-    html = fetch_page(completed_events_url, ".b-statistics__sub-tabs-link")
-    print(f"completed events html: {html[:500]}")
-    events_list = extract_events(html)
-    print(f"events list length = {len(events_list)}")
-    for event in events_list[:2]:
-        event_html = fetch_page(event.url, ".b-content__title-highlight")
-        print(f"event_html = {event_html[:10000]}")
-        fight_urls = extract_fight_urls(event_html)
-        for fight_url in fight_urls:
-            fight_html = fetch_page(fight_url, ".b-fight-details__fight-title")
-            fight = extract_fight(fight_html, fight_url)
-            event.fights.append(fight)
-    
-    for event in events_list[:2]:
-        print(f"Event {event.name} fights: {event.fights}")
-        assert len(event.fights) > 0
-    
+    # One browser window for every page in this test.
+    browser_session = BrowserSession()
+    try:
+        html = browser_session.fetch_page(completed_events_url, ".b-statistics__sub-tabs-link")
+        print(f"completed events html: {html[:500]}")
+        events_list = extract_events(html)
+        print(f"events list length = {len(events_list)}")
+        for event in events_list[:2]:
+            event_html = browser_session.fetch_page(event.url, ".b-content__title-highlight")
+            print(f"event_html = {event_html[:10000]}")
+            fight_urls = extract_fight_urls(event_html)
+            for fight_url in fight_urls:
+                fight_html = browser_session.fetch_page(fight_url, ".b-fight-details__fight-title")
+                fight = extract_fight(fight_html, fight_url)
+                event.fights.append(fight)
+
+        for event in events_list[:2]:
+            print(f"Event {event.name} fights: {event.fights}")
+            assert len(event.fights) > 0
+    finally:
+        browser_session.browser.close()
+        browser_session.playwright.stop()

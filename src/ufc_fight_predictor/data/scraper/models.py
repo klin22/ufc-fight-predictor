@@ -13,6 +13,14 @@ class Fighter(BaseModel):
     url: str
 
 
+class FighterProfile(BaseModel):
+    ufcstats_id: str
+    height_in: int | None
+    reach_in: int | None
+    stance: str | None
+    dob: str | None
+
+
 class Fight(BaseModel):
     ufcstats_id: str
     url: str

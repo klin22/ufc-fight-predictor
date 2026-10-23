@@ -67,6 +67,10 @@ class Fighter(Base):
         unique=True,
         nullable=False,
     )
+    height_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reach_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stance: Mapped[str | None] = mapped_column(String, nullable=True)
+    dob: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     fight_stats: Mapped[list[FightStats]] = relationship(
         back_populates="fighter",

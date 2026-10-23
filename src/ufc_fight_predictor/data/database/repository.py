@@ -25,6 +25,9 @@ from ufc_fight_predictor.data.scraper.models import (
     FighterFightStats as DomainFightStats,
 )
 from ufc_fight_predictor.data.scraper.models import (
+    FighterProfile as DomainFighterProfile,
+)
+from ufc_fight_predictor.data.scraper.models import (
     RoundStats as DomainRoundStats,
 )
 
@@ -59,6 +62,16 @@ def _parse_event_date(value: str) -> date:
         parsed = strptime(value, "%B %d, %Y")
     except ValueError as error:
         raise ValueError(f"Invalid UFCStats event date: {value!r}") from error
+    return date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday)
+
+
+def _parse_dob(value: str | None) -> date | None:
+    if value is None:
+        return None
+    try:
+        parsed = strptime(value, "%b %d, %Y")
+    except ValueError as error:
+        raise ValueError(f"Invalid UFCStats DOB: {value!r}") from error
     return date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday)
 
 
@@ -107,6 +120,21 @@ def save_fighter(session: Session, fighter: DomainFighter) -> Fighter:
         return existing
 
     session.add(record)
+    session.flush()
+    return record
+
+
+def save_fighter_profile(session: Session, profile: DomainFighterProfile) -> Fighter:
+    record = session.scalar(
+        select(Fighter).where(Fighter.ufcstats_id == profile.ufcstats_id)
+    )
+    if record is None:
+        raise ValueError(f"Fighter {profile.ufcstats_id} is not saved")
+
+    record.height_in = profile.height_in
+    record.reach_in = profile.reach_in
+    record.stance = profile.stance
+    record.dob = _parse_dob(profile.dob)
     session.flush()
     return record
 

@@ -18,6 +18,7 @@ from ufc_fight_predictor.data.database.models import (
 from ufc_fight_predictor.data.scraper.models import Event as DomainEvent
 
 FIGHT_HTML = (Path(__file__).parent / "captured_html/test_fight.html").read_text()
+FIGHTER_HTML = (Path(__file__).parent / "captured_html/test_fighter.html").read_text()
 
 
 @pytest.fixture
@@ -37,6 +38,11 @@ def scrape(monkeypatch, tmp_path):
     pages = {
         "start": '<a class="b-statistics__paginate-link" href="all">All</a>',
         "all": "events",
+        # Profile pages for both fighters in FIGHT_HTML.
+        **{
+            f"http://www.ufcstats.com/fighter-details/{fighter_id}": FIGHTER_HTML
+            for fighter_id in ("c96d9178c9ed9e62", "32ab52e5de93092d")
+        },
     }
     events = []
 

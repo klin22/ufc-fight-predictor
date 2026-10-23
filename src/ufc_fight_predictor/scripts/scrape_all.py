@@ -8,16 +8,18 @@ from sqlalchemy import Column, ForeignKey, String, Table, select
 from sqlalchemy.orm import Session
 
 from ufc_fight_predictor.data.database.connection import SessionLocal, engine
-from ufc_fight_predictor.data.database.models import Base, Event
+from ufc_fight_predictor.data.database.models import Base, Event, Fighter
 from ufc_fight_predictor.data.database.repository import (
     save_event,
     save_fight,
     save_fight_stats,
     save_fighter,
+    save_fighter_profile,
     save_round_stats,
 )
 from ufc_fight_predictor.data.scraper.browsersession import BrowserSession
 from ufc_fight_predictor.data.scraper.events import extract_events, extract_fight_urls
+from ufc_fight_predictor.data.scraper.fighters import extract_fighter_profile
 from ufc_fight_predictor.data.scraper.fights import (
     extract_fight,
     extract_fight_stats,
@@ -35,6 +37,17 @@ COMPLETED_EVENTS = Table(
         "event_id",
         String,
         ForeignKey("events.ufcstats_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+# Marks fighters whose profile page was saved, including pages with no data.
+COMPLETED_FIGHTERS = Table(
+    "scrape_completed_fighters",
+    Base.metadata,
+    Column(
+        "fighter_id",
+        String,
+        ForeignKey("fighters.ufcstats_id", ondelete="CASCADE"),
         primary_key=True,
     ),
 )
@@ -156,6 +169,36 @@ def scrape_fight(
                 save_round_stats(session, stats, saved_fight, saved_fighter)
 
 
+def scrape_fighter_profiles(
+    browser_session: BrowserSession,
+    session: Session,
+    failed_urls: list[dict[str, str]],
+) -> None:
+    """Save profiles for fighters not yet completed, committing each one."""
+    fighters = session.scalars(
+        select(Fighter).where(
+            Fighter.ufcstats_id.not_in(select(COMPLETED_FIGHTERS.c.fighter_id))
+        )
+    ).all()
+    print(f"Scraping profiles for {len(fighters)} fighters")
+    for fighter in fighters:
+        stage = "fetch"
+        try:
+            fighter_html = browser_session.fetch_page(fighter.url, ".b-list__box-list")
+            stage = "extract"
+            profile = extract_fighter_profile(fighter_html, fighter.ufcstats_id)
+        except Exception as error:
+            record_failure(failed_urls, fighter.url, "fighter", stage, error)
+            logger.exception("Failed to %s fighter page %s", stage, fighter.url)
+            continue
+
+        save_fighter_profile(session, profile)
+        session.execute(
+            COMPLETED_FIGHTERS.insert().values(fighter_id=fighter.ufcstats_id)
+        )
+        session.commit()
+
+
 def scrape_events(failed_urls: list[dict[str, str]], *, reset: bool = False) -> None:
     # BrowserSession visits the starting page during initialization.
     url = "http://www.ufcstats.com/statistics/events/completed"
@@ -231,6 +274,7 @@ def scrape_events(failed_urls: list[dict[str, str]], *, reset: bool = False) -> 
                 print(
                     f"Event {domainevent.name} saved with {failure_count} failed fights"
                 )
+            scrape_fighter_profiles(browser_session, session, failed_urls)
         except Exception:
             session.rollback()
             logger.exception("Database session failed")
